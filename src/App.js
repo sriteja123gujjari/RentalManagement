@@ -32,21 +32,26 @@ const DEFAULT_SHOPS_DATA = [
 ];
 
 const App = () => {
-  // --- STATE MANAGEMENT (Replaces Database) ---
-  // We initialize state from LocalStorage if available, otherwise empty arrays
+  // --- STATE MANAGEMENT (Local Storage) ---
   const [shops, setShops] = useState(() => {
-    const saved = localStorage.getItem('rentManager_shops');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('rentManager_shops');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) { return []; }
   });
 
   const [records, setRecords] = useState(() => {
-    const saved = localStorage.getItem('rentManager_records');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('rentManager_records');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) { return []; }
   });
 
   const [expenses, setExpenses] = useState(() => {
-    const saved = localStorage.getItem('rentManager_expenses');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('rentManager_expenses');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) { return []; }
   });
 
   const [currentMonth, setCurrentMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
@@ -74,13 +79,13 @@ const App = () => {
     localStorage.setItem('rentManager_expenses', JSON.stringify(expenses));
   }, [expenses]);
 
-  // Simulate loading delay for smooth UI
+  // Simulate loading
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 500);
     return () => clearTimeout(timer);
   }, []);
 
-  // Load PDF Libraries
+  // Load PDF Libraries from CDN
   useEffect(() => {
     const loadScript = (url) => {
       return new Promise((resolve) => {
@@ -107,7 +112,7 @@ const App = () => {
     initPdfLibs();
   }, []);
 
-  // --- CALCULATIONS (Business Logic) ---
+  // --- CALCULATIONS ---
   const monthlyData = useMemo(() => {
     const monthRecords = records.filter(r => r.month === currentMonth);
     const monthExpenses = expenses.filter(e => e.month === currentMonth);
@@ -120,43 +125,40 @@ const App = () => {
     // Total Expenses
     const totalExpenses = monthExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
     
-    // Net Profit
+    // Net Profit & Split
     const net = received - totalExpenses;
-    
-    // Target Share per person (Net Profit / 3)
     const split = net / 3;
 
     // --- Settlement Logic ---
     const memberBalances = {};
     MEMBERS.forEach(m => memberBalances[m] = 0);
 
-    // Add collected rent to holder
+    // Rent Collected
     monthRecords.forEach(r => {
       if (r.status === 'Paid' && r.collectedBy && MEMBERS.includes(r.collectedBy)) {
         memberBalances[r.collectedBy] += Number(r.amountPaid || 0);
       }
     });
 
-    // Subtract expenses paid by member
+    // Expenses Paid
     monthExpenses.forEach(e => {
       if (e.paidBy && MEMBERS.includes(e.paidBy)) {
         memberBalances[e.paidBy] -= Number(e.amount || 0);
       }
     });
 
-    // Calculate Settlement (Difference from Target Split)
+    // Balances
     const settlements = MEMBERS.map(member => {
       const holding = memberBalances[member];
-      const balance = holding - split; // Positive = Pay others, Negative = Receive
+      const balance = holding - split; 
       return { member, holding, balance };
     });
 
-    // Generate Transactions
+    // Transactions Logic
     const debtors = settlements.filter(s => s.balance > 0.01).sort((a, b) => b.balance - a.balance);
     const creditors = settlements.filter(s => s.balance < -0.01).sort((a, b) => a.balance - b.balance);
     
     const transactions = [];
-    
     let dIndex = 0;
     let cIndex = 0;
 
@@ -188,7 +190,6 @@ const App = () => {
   }, [records, expenses, currentMonth]);
 
   // --- ACTIONS ---
-
   const generateId = () => Math.random().toString(36).substr(2, 9);
 
   const seedDefaultShops = () => {
@@ -217,8 +218,6 @@ const App = () => {
   const deleteShop = (id) => {
     if(window.confirm("Are you sure you want to delete this shop?")) {
         setShops(shops.filter(s => s.id !== id));
-        // Optional: Cleanup records associated with this shop? 
-        // For simplicity, we keep records history even if shop is deleted
     }
   };
 
@@ -226,7 +225,6 @@ const App = () => {
     const existingIndex = records.findIndex(r => r.shopId === shopId && r.month === currentMonth);
     
     if (existingIndex >= 0) {
-      // Toggle
       const updatedRecords = [...records];
       const currentStatus = updatedRecords[existingIndex].status;
       
@@ -234,11 +232,10 @@ const App = () => {
         ...updatedRecords[existingIndex],
         status: currentStatus === 'Paid' ? 'Unpaid' : 'Paid',
         amountPaid: currentStatus === 'Paid' ? 0 : baseRent,
-        collectedBy: currentStatus === 'Paid' ? null : MEMBERS[0] // Default
+        collectedBy: currentStatus === 'Paid' ? null : MEMBERS[0]
       };
       setRecords(updatedRecords);
     } else {
-      // Create New
       const newRecord = {
         id: generateId(),
         shopId,
@@ -280,6 +277,7 @@ const App = () => {
     setExpenses(expenses.filter(e => e.id !== id));
   };
 
+  // --- PDF GENERATION (COMPACT MODE) ---
   const generatePDF = () => {
     if (!window.jspdf) return;
     
@@ -288,86 +286,87 @@ const App = () => {
     const [year, month] = currentMonth.split('-');
     const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long' });
 
-    // Set Default Font to Bold
     doc.setFont("helvetica", "bold");
-
-    // Header - Compact
-    doc.setFillColor(248, 250, 252);
-    doc.rect(0, 0, 210, 30, 'F');
     
-    doc.setFontSize(22);
+    // Compact Header
+    doc.setFillColor(248, 250, 252);
+    doc.rect(0, 0, 210, 25, 'F');
+    
+    doc.setFontSize(16);
     doc.setTextColor(30, 41, 59);
-    doc.text(`Rent Report: ${monthName} ${year}`, 14, 20);
+    doc.text(`Rent Report: ${monthName} ${year}`, 14, 16);
     
     const today = new Date();
     const dateStr = `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
 
-    doc.setFontSize(12);
+    doc.setFontSize(10);
     doc.setTextColor(71, 85, 105);
-    doc.text(`Date: ${dateStr}`, 150, 20);
+    doc.text(`Date: ${dateStr}`, 160, 16);
 
-    // Summary Cards
-    const cardY = 38;
-    const cardWidth = 50;
-    const cardHeight = 30;
-    const gap = 10;
+    // Compact Summary Cards
+    const cardY = 30;
+    const cardWidth = 43; // Small width
+    const cardHeight = 20; // Small height
+    const gap = 8;
     const margin = 14;
 
     // Green Card
     doc.setFillColor(34, 197, 94);
-    doc.roundedRect(margin, cardY, cardWidth, cardHeight, 3, 3, 'F');
+    doc.roundedRect(margin, cardY, cardWidth, cardHeight, 2, 2, 'F');
     doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8);
+    doc.text('RECEIVED', margin + 4, cardY + 7);
     doc.setFontSize(11);
-    doc.text('RECEIVED', margin + 5, cardY + 10);
-    doc.setFontSize(14);
-    doc.text(`Rs. ${monthlyData.received.toLocaleString()}`, margin + 5, cardY + 22);
+    doc.text(`Rs. ${monthlyData.received.toLocaleString()}`, margin + 4, cardY + 16);
 
     // Red Card
     doc.setFillColor(239, 68, 68);
-    doc.roundedRect(margin + cardWidth + gap, cardY, cardWidth, cardHeight, 3, 3, 'F');
+    doc.roundedRect(margin + cardWidth + gap, cardY, cardWidth, cardHeight, 2, 2, 'F');
     doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8);
+    doc.text('EXPENSES', margin + cardWidth + gap + 4, cardY + 7);
     doc.setFontSize(11);
-    doc.text('EXPENSES', margin + cardWidth + gap + 5, cardY + 10);
-    doc.setFontSize(14);
-    doc.text(`Rs. ${monthlyData.totalExpenses.toLocaleString()}`, margin + cardWidth + gap + 5, cardY + 22);
+    doc.text(`Rs. ${monthlyData.totalExpenses.toLocaleString()}`, margin + cardWidth + gap + 4, cardY + 16);
 
     // Blue Card
     doc.setFillColor(59, 130, 246);
-    doc.roundedRect(margin + (cardWidth + gap) * 2, cardY, cardWidth, cardHeight, 3, 3, 'F');
+    doc.roundedRect(margin + (cardWidth + gap) * 2, cardY, cardWidth, cardHeight, 2, 2, 'F');
     doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8);
+    doc.text('TARGET SPLIT', margin + (cardWidth + gap) * 2 + 4, cardY + 7);
     doc.setFontSize(11);
-    doc.text('TARGET SPLIT', margin + (cardWidth + gap) * 2 + 5, cardY + 10);
-    doc.setFontSize(14);
-    doc.text(`Rs. ${monthlyData.split.toLocaleString()}`, margin + (cardWidth + gap) * 2 + 5, cardY + 22);
+    doc.text(`Rs. ${monthlyData.split.toLocaleString()}`, margin + (cardWidth + gap) * 2 + 4, cardY + 16);
 
     doc.setTextColor(0, 0, 0);
 
-    let currentY = cardY + cardHeight + 15;
+    let currentY = cardY + cardHeight + 10;
 
-    // Transactions
+    // Compact Table Styles
+    const tableStyles = { fontSize: 8, cellPadding: 1.5, fontStyle: 'bold' };
+    const headStyles = { fillColor: [59, 130, 246], fontStyle: 'bold', fontSize: 8, cellPadding: 2 };
+
     if (monthlyData.transactions.length > 0) {
-        doc.setFontSize(14);
+        doc.setFontSize(10);
         doc.setTextColor(30, 41, 59);
         doc.text('Settlement Plan', 14, currentY);
         
         const transactionBody = monthlyData.transactions.map(t => [
             t.from, 'pays', t.to,
-            `Rs. ${t.amount.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2})}`
+            `Rs. ${t.amount.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}`
         ]);
 
         doc.autoTable({
-            startY: currentY + 6,
+            startY: currentY + 3,
             head: [['From', 'Action', 'To', 'Amount']],
             body: transactionBody,
             theme: 'striped',
-            headStyles: { fillColor: [59, 130, 246], fontStyle: 'bold', fontSize: 11 },
-            styles: { fontSize: 11, fontStyle: 'bold', cellPadding: 3 },
+            headStyles: headStyles,
+            styles: tableStyles,
             margin: { left: 14, right: 14 }
         });
-        currentY = doc.lastAutoTable.finalY + 15;
+        currentY = doc.lastAutoTable.finalY + 8;
     }
 
-    // Shop Details
     const shopBody = shops.map(shop => {
       const rec = monthlyData.monthRecords.find(r => r.shopId === shop.id);
       return [
@@ -378,17 +377,17 @@ const App = () => {
       ];
     });
 
-    doc.setFontSize(14);
+    doc.setFontSize(10);
     doc.setTextColor(30, 41, 59);
     doc.text('Shop Payment Details', 14, currentY);
     
     doc.autoTable({
-      startY: currentY + 6,
-      head: [['Shop Name', 'Base Rent', 'Status & Collector', 'Paid Amount']],
+      startY: currentY + 3,
+      head: [['Shop Name', 'Base Rent', 'Status', 'Paid']],
       body: shopBody,
       theme: 'grid',
-      headStyles: { fillColor: [71, 85, 105], textColor: 255, fontStyle: 'bold', fontSize: 11 },
-      styles: { fontSize: 11, cellPadding: 3, fontStyle: 'bold' },
+      headStyles: { ...headStyles, fillColor: [71, 85, 105] },
+      styles: tableStyles,
       columnStyles: {
         2: { fontStyle: 'bold', textColor: (cell) => cell.raw.startsWith('Paid') ? [34, 197, 94] : [239, 68, 68] }
       },
@@ -399,9 +398,8 @@ const App = () => {
       }
     });
 
-    currentY = doc.lastAutoTable.finalY + 15;
+    currentY = doc.lastAutoTable.finalY + 8;
 
-    // Expenses
     if (monthlyData.monthExpenses.length > 0) {
       if (currentY > 250) { doc.addPage(); currentY = 20; }
 
@@ -410,12 +408,12 @@ const App = () => {
       ]);
       doc.text('Monthly Expenditures', 14, currentY);
       doc.autoTable({
-        startY: currentY + 6,
+        startY: currentY + 3,
         head: [['Description', 'Paid By', 'Amount']],
         body: expenseBody,
         theme: 'striped',
-        headStyles: { fillColor: [239, 68, 68], fontStyle: 'bold', fontSize: 11 },
-        styles: { fontSize: 11, cellPadding: 3, fontStyle: 'bold' }
+        headStyles: { ...headStyles, fillColor: [239, 68, 68] },
+        styles: tableStyles
       });
     }
 
@@ -439,8 +437,8 @@ const App = () => {
   return (
     <div className="min-h-screen bg-gray-50 text-slate-800 font-sans pb-12">
       <header className="bg-white border-b sticky top-0 z-20 shadow-sm backdrop-blur-md bg-white/80">
-        <div className="max-w-7xl mx-auto px-4 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-4 py-3 sm:h-20 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3 w-full sm:w-auto justify-center sm:justify-start">
             <div className="bg-indigo-600 p-2 rounded-lg text-white shadow-lg shadow-indigo-200">
               <Building2 size={24} />
             </div>
@@ -450,7 +448,7 @@ const App = () => {
             </div>
           </div>
           
-          <div className="flex items-center gap-3 sm:gap-6">
+          <div className="flex items-center gap-3 w-full sm:w-auto justify-center sm:justify-end">
             <div className="flex items-center bg-white rounded-xl p-1 border shadow-sm ring-1 ring-slate-100">
               <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-slate-50 rounded-lg transition-colors active:scale-95 text-slate-500">
                 <ChevronLeft size={20} />
@@ -482,53 +480,53 @@ const App = () => {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-8">
-        {/* Warning about persistence */}
         <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-3 text-amber-800 text-sm">
-            <AlertCircle size={20} />
+            <AlertCircle size={20} className="flex-shrink-0" />
             <p><strong>Note:</strong> Data is saved in this browser. If you clear cache or use a different device, data will not be available.</p>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {/* COMPACT STATS GRID: 1 col mobile, 2 cols tablet, 4 cols desktop */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
           <StatCard title="Received" value={monthlyData.received} type="success" icon={TrendingUp} />
           <StatCard title="Expenses" value={monthlyData.totalExpenses} type="danger" icon={Receipt} />
           <StatCard title="Net Profit" value={monthlyData.net} type="primary" icon={Wallet} />
           <StatCard title="Share (1/3)" value={monthlyData.split} type="warning" icon={Users} />
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-          <div className="xl:col-span-2 space-y-8">
+        {/* MAIN LAYOUT: 1 col (mobile/tablet), 3 cols (desktop) */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          
+          {/* LEFT COLUMN: Shops & Expenses List */}
+          <div className="lg:col-span-2 space-y-8">
             
             {/* Settlement Calculator */}
             {monthlyData.transactions.length > 0 && (
-              <section className="bg-indigo-900 rounded-3xl shadow-xl p-8 text-white relative overflow-hidden">
+              <section className="bg-indigo-900 rounded-3xl shadow-xl p-6 text-white relative overflow-hidden">
                 <div className="absolute top-0 right-0 p-8 opacity-10">
                    <ArrowRightLeft size={120} />
                 </div>
                 <div className="relative z-10">
-                   <h2 className="text-xl font-bold flex items-center gap-2 mb-6">
+                   <h2 className="text-lg font-bold flex items-center gap-2 mb-4">
                       <ArrowRightLeft className="text-indigo-300" />
                       Settlement Plan
                    </h2>
-                   <div className="grid gap-4">
+                   <div className="grid gap-3">
                       {monthlyData.transactions.map((t, idx) => (
-                        <div key={idx} className="bg-white/10 backdrop-blur-md rounded-xl p-4 flex items-center justify-between border border-white/5">
-                            <div className="flex items-center gap-3">
-                                <div className="bg-rose-500/20 text-rose-300 p-2 rounded-lg font-bold text-xs uppercase w-24 text-center">
+                        <div key={idx} className="bg-white/10 backdrop-blur-md rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between border border-white/5 gap-3">
+                            <div className="flex items-center gap-3 w-full sm:w-auto">
+                                <div className="bg-rose-500/20 text-rose-300 p-1.5 rounded-lg font-bold text-xs uppercase flex-1 sm:flex-none text-center sm:w-24">
                                     {t.from}
                                 </div>
-                                <span className="text-white/50 text-sm">pays</span>
-                                <div className="bg-emerald-500/20 text-emerald-300 p-2 rounded-lg font-bold text-xs uppercase w-24 text-center">
+                                <span className="text-white/50 text-xs">pays</span>
+                                <div className="bg-emerald-500/20 text-emerald-300 p-1.5 rounded-lg font-bold text-xs uppercase flex-1 sm:flex-none text-center sm:w-24">
                                     {t.to}
                                 </div>
                             </div>
-                            <div className="font-bold text-xl font-mono">
+                            <div className="font-bold text-lg font-mono">
                                 ₹{t.amount.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}
                             </div>
                         </div>
                       ))}
-                   </div>
-                   <div className="mt-4 text-xs text-indigo-300 opacity-70">
-                      *Calculated based on rent collected by each member minus expenses paid by them.
                    </div>
                 </div>
               </section>
@@ -536,20 +534,19 @@ const App = () => {
 
             {/* Shop List Management */}
             <section className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden">
-              <div className="p-6 sm:p-8 border-b border-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="p-5 border-b border-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-xl font-bold flex items-center gap-2 text-slate-800">
-                    <Building2 className="text-indigo-500" size={24} />
+                  <h2 className="text-lg font-bold flex items-center gap-2 text-slate-800">
+                    <Building2 className="text-indigo-500" size={20} />
                     Shop Status
                   </h2>
-                  <p className="text-sm text-slate-400 mt-1">Manage monthly rent collection</p>
                 </div>
                 {shops.length === 0 && (
                   <button 
                     onClick={seedDefaultShops}
-                    className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200"
+                    className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold text-xs hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200 w-full sm:w-auto justify-center"
                   >
-                    <Save size={16} />
+                    <Save size={14} />
                     Load Default Shops
                   </button>
                 )}
@@ -559,10 +556,10 @@ const App = () => {
                 <table className="w-full text-left min-w-[600px]">
                   <thead>
                     <tr className="bg-slate-50/50 text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100">
-                      <th className="px-8 py-5">Shop Details</th>
-                      <th className="px-6 py-5">Rent Amount</th>
-                      <th className="px-6 py-5 text-center">Status & Collector</th>
-                      <th className="px-6 py-5 text-right">Actions</th>
+                      <th className="px-6 py-4">Shop Details</th>
+                      <th className="px-4 py-4">Rent Amount</th>
+                      <th className="px-4 py-4 text-center">Status & Collector</th>
+                      <th className="px-4 py-4 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
@@ -573,27 +570,26 @@ const App = () => {
                       
                       return (
                         <tr key={shop.id} className="hover:bg-slate-50 transition-colors group">
-                          <td className="px-8 py-5">
-                            <span className="font-bold text-slate-700 block text-base">{shop.name}</span>
-                            <span className="text-xs text-slate-400 font-medium">ID: {shop.id.slice(0, 6)}</span>
+                          <td className="px-6 py-4">
+                            <span className="font-bold text-slate-700 block text-sm">{shop.name}</span>
                           </td>
-                          <td className="px-6 py-5">
-                            <div className="flex items-center gap-1 font-bold text-slate-600 font-mono bg-slate-100 w-fit px-3 py-1 rounded-lg">
-                              <IndianRupee size={14} />
+                          <td className="px-4 py-4">
+                            <div className="flex items-center gap-1 font-bold text-slate-600 font-mono bg-slate-100 w-fit px-2 py-1 rounded text-xs">
+                              <IndianRupee size={12} />
                               {shop.baseRent.toLocaleString()}
                             </div>
                           </td>
-                          <td className="px-6 py-5">
+                          <td className="px-4 py-4">
                             <div className="flex flex-col items-center gap-2">
                                 <button 
                                 onClick={() => toggleRentStatus(shop.id, shop.baseRent)}
-                                className={`relative overflow-hidden inline-flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 border w-full justify-center ${
+                                className={`relative overflow-hidden inline-flex items-center gap-2 px-4 py-1.5 rounded-lg text-[10px] font-bold transition-all shadow-sm active:scale-95 border w-full justify-center ${
                                     isPaid 
                                     ? 'bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-100' 
                                     : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
                                 }`}
                                 >
-                                {isPaid ? <CheckCircle2 size={16} className="text-emerald-500" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-300"></div>}
+                                {isPaid ? <CheckCircle2 size={12} className="text-emerald-500" /> : <div className="w-3 h-3 rounded-full border-2 border-slate-300"></div>}
                                 {isPaid ? 'PAID' : 'MARK PAID'}
                                 </button>
                                 
@@ -601,7 +597,7 @@ const App = () => {
                                     <select 
                                         value={collectedBy}
                                         onChange={(e) => updateCollectedBy(shop.id, e.target.value)}
-                                        className="text-xs p-1 border rounded bg-slate-50 text-slate-600 outline-none focus:ring-1 focus:ring-indigo-500 w-full"
+                                        className="text-[10px] p-1 border rounded bg-slate-50 text-slate-600 outline-none focus:ring-1 focus:ring-indigo-500 w-full"
                                     >
                                         {MEMBERS.map(m => (
                                             <option key={m} value={m}>{m}</option>
@@ -610,12 +606,12 @@ const App = () => {
                                 )}
                             </div>
                           </td>
-                          <td className="px-6 py-5 text-right">
+                          <td className="px-4 py-4 text-right">
                             <button 
                               onClick={() => deleteShop(shop.id)}
-                              className="text-slate-300 hover:text-rose-500 hover:bg-rose-50 p-2.5 rounded-xl transition-all"
+                              className="text-slate-300 hover:text-rose-500 hover:bg-rose-50 p-2 rounded-lg transition-all"
                             >
-                              <Trash2 size={18} />
+                              <Trash2 size={16} />
                             </button>
                           </td>
                         </tr>
@@ -623,7 +619,7 @@ const App = () => {
                     })}
                     {shops.length === 0 && (
                       <tr>
-                         <td colSpan="4" className="text-center py-12 text-slate-400">
+                         <td colSpan="4" className="text-center py-8 text-slate-400 text-sm">
                             No shops yet. Click "Load Default Shops" above.
                          </td>
                       </tr>
@@ -631,32 +627,31 @@ const App = () => {
                   </tbody>
                 </table>
               </div>
-              <div className="p-6 sm:p-8 bg-slate-50/50 border-t border-slate-100">
-                <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+              <div className="p-5 bg-slate-50/50 border-t border-slate-100">
+                <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
                   <div className="flex-grow w-full sm:w-auto">
                     <input 
                       type="text" 
                       placeholder="Shop Name"
-                      className="w-full p-4 rounded-xl border-none bg-white shadow-sm ring-1 ring-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                      className="w-full p-3 rounded-lg border-none bg-white shadow-sm ring-1 ring-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-medium text-sm"
                       value={newShopName}
                       onChange={(e) => setNewShopName(e.target.value)}
                     />
                   </div>
-                  <div className="w-full sm:w-48 relative">
-                    <IndianRupee size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <div className="w-full sm:w-40 relative">
                     <input 
                       type="number" 
                       placeholder="Rent Amount"
-                      className="w-full p-4 pl-10 rounded-xl border-none bg-white shadow-sm ring-1 ring-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                      className="w-full p-3 rounded-lg border-none bg-white shadow-sm ring-1 ring-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-medium text-sm"
                       value={newShopRent}
                       onChange={(e) => setNewShopRent(e.target.value)}
                     />
                   </div>
                   <button 
                     onClick={addShop}
-                    className="w-full sm:w-auto h-[52px] px-6 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-200 font-bold active:scale-95"
+                    className="w-full sm:w-auto h-[42px] px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-200 font-bold active:scale-95 text-sm"
                   >
-                    <Plus size={20} />
+                    <Plus size={16} />
                     <span>Add</span>
                   </button>
                 </div>
@@ -665,64 +660,66 @@ const App = () => {
 
             {/* Expenses List */}
             <section className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden">
-              <div className="p-6 sm:p-8 border-b border-slate-50 flex items-center justify-between">
+              <div className="p-5 border-b border-slate-50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-xl font-bold flex items-center gap-2 text-slate-800">
-                    <CreditCard className="text-rose-500" size={24} />
+                  <h2 className="text-lg font-bold flex items-center gap-2 text-slate-800">
+                    <CreditCard className="text-rose-500" size={20} />
                     Monthly Expenditures
                   </h2>
                 </div>
-                <div className="bg-rose-50 text-rose-700 px-3 py-1 rounded-lg text-sm font-bold">
+                <div className="bg-rose-50 text-rose-700 px-3 py-1 rounded-lg text-xs font-bold w-full sm:w-auto text-center">
                   Total: ₹{monthlyData.totalExpenses.toLocaleString()}
                 </div>
               </div>
-              <div className="p-6 sm:p-8 space-y-4 max-h-[500px] overflow-y-auto custom-scrollbar">
+              <div className="p-5 space-y-3 max-h-[400px] overflow-y-auto custom-scrollbar">
                 {monthlyData.monthExpenses.map(exp => (
-                  <div key={exp.id} className="flex items-center justify-between bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all group ring-1 ring-slate-50">
-                    <div className="flex items-center gap-5">
-                      <div className="w-12 h-12 rounded-xl bg-rose-50 text-rose-500 flex items-center justify-center shadow-inner">
-                        <Receipt size={20} />
+                  <div key={exp.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-white p-4 rounded-xl border border-slate-100 shadow-sm hover:shadow-md transition-all group ring-1 ring-slate-50 gap-3">
+                    <div className="flex items-center gap-4 w-full sm:w-auto">
+                      <div className="w-10 h-10 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center shadow-inner flex-shrink-0">
+                        <Receipt size={18} />
                       </div>
                       <div>
-                        <p className="font-bold text-slate-700 text-lg">{exp.description}</p>
-                        <div className="flex items-center gap-2 text-xs text-slate-400 font-medium uppercase tracking-wider">
+                        <p className="font-bold text-slate-700 text-sm">{exp.description}</p>
+                        <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-400 font-medium uppercase tracking-wider">
                            <span>{new Date(exp.timestamp).toLocaleDateString()}</span>
                            <span>•</span>
                            <span className="text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">Paid by {exp.paidBy || 'Shared'}</span>
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-6">
-                      <span className="font-bold text-rose-600 text-xl font-mono">-₹{exp.amount.toLocaleString()}</span>
+                    <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
+                      <span className="font-bold text-rose-600 text-lg font-mono">-₹{exp.amount.toLocaleString()}</span>
                       <button 
                         onClick={() => deleteExpense(exp.id)}
                         className="text-slate-300 hover:text-rose-500 hover:bg-rose-50 p-2 rounded-lg transition-all"
                       >
-                        <Trash2 size={18} />
+                        <Trash2 size={16} />
                       </button>
                     </div>
                   </div>
                 ))}
                 {monthlyData.monthExpenses.length === 0 && (
-                  <div className="text-center py-16 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-                    <p className="text-slate-500 font-medium">No expenses recorded</p>
+                  <div className="text-center py-10 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                    <p className="text-slate-500 font-medium text-sm">No expenses recorded</p>
                   </div>
                 )}
               </div>
             </section>
           </div>
 
-          <div className="space-y-8">
-             <section className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 p-6 sm:p-8">
+          {/* RIGHT COLUMN: Sidebar Tools */}
+          <div className="space-y-6">
+             {/* Balance Sheet */}
+             <section className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 p-5">
                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-800">
                     <UserCircle size={20} className="text-indigo-500" />
                     Balance Sheet
                  </h3>
-                 <div className="space-y-3">
+                 <div className="space-y-2">
                      {monthlyData.settlements.map((s, idx) => (
                          <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100">
-                             <div className="text-sm font-bold text-slate-700">{s.member}</div>
-                             <div className={`text-sm font-mono font-bold ${s.balance > 0 ? 'text-rose-500' : s.balance < 0 ? 'text-emerald-500' : 'text-slate-400'}`}>
+                             <div className="text-xs font-bold text-slate-700">{s.member}</div>
+                             <div className={`text-xs font-mono font-bold ${s.balance > 0 ? 'text-rose-500' : s.balance < 0 ? 'text-emerald-500' : 'text-slate-400'}`}>
                                  {s.balance > 0 ? `Pays ₹${s.balance.toFixed(0)}` : s.balance < 0 ? `Gets ₹${Math.abs(s.balance).toFixed(0)}` : 'Settled'}
                              </div>
                          </div>
@@ -730,41 +727,39 @@ const App = () => {
                  </div>
              </section>
 
-            <section className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 p-6 sm:p-8">
-              <h3 className="text-lg font-bold mb-6 flex items-center gap-2 text-slate-800">
-                <div className="p-2 bg-rose-100 rounded-lg text-rose-600">
-                   <CreditCard size={18} />
+            {/* Quick Expense Form */}
+            <section className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 p-5">
+              <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-800">
+                <div className="p-1.5 bg-rose-100 rounded-lg text-rose-600">
+                   <CreditCard size={16} />
                 </div>
                 Quick Expense
               </h3>
-              <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 ml-1 uppercase">Description</label>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 ml-1 uppercase">Description</label>
                   <input 
                     type="text" 
-                    placeholder="e.g. Electricity Bill"
-                    className="w-full p-4 rounded-xl bg-slate-50 border-none ring-1 ring-slate-100 focus:ring-2 focus:ring-rose-500 focus:bg-white outline-none font-medium transition-all"
+                    placeholder="e.g. Bill"
+                    className="w-full p-3 rounded-lg bg-slate-50 border-none ring-1 ring-slate-100 focus:ring-2 focus:ring-rose-500 focus:bg-white outline-none font-medium transition-all text-sm"
                     value={newExpenseDesc}
                     onChange={(e) => setNewExpenseDesc(e.target.value)}
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 ml-1 uppercase">Amount</label>
-                  <div className="relative">
-                    <IndianRupee size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input 
-                      type="number" 
-                      placeholder="0.00"
-                      className="w-full p-4 pl-10 rounded-xl bg-slate-50 border-none ring-1 ring-slate-100 focus:ring-2 focus:ring-rose-500 focus:bg-white outline-none font-medium transition-all"
-                      value={newExpenseAmount}
-                      onChange={(e) => setNewExpenseAmount(e.target.value)}
-                    />
-                  </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 ml-1 uppercase">Amount</label>
+                  <input 
+                    type="number" 
+                    placeholder="0.00"
+                    className="w-full p-3 rounded-lg bg-slate-50 border-none ring-1 ring-slate-100 focus:ring-2 focus:ring-rose-500 focus:bg-white outline-none font-medium transition-all text-sm"
+                    value={newExpenseAmount}
+                    onChange={(e) => setNewExpenseAmount(e.target.value)}
+                  />
                 </div>
-                <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-500 ml-1 uppercase">Paid By</label>
+                <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500 ml-1 uppercase">Paid By</label>
                     <select 
-                        className="w-full p-4 rounded-xl bg-slate-50 border-none ring-1 ring-slate-100 focus:ring-2 focus:ring-rose-500 focus:bg-white outline-none font-medium transition-all text-slate-700"
+                        className="w-full p-3 rounded-lg bg-slate-50 border-none ring-1 ring-slate-100 focus:ring-2 focus:ring-rose-500 focus:bg-white outline-none font-medium transition-all text-slate-700 text-sm"
                         value={newExpensePayer}
                         onChange={(e) => setNewExpensePayer(e.target.value)}
                     >
@@ -776,10 +771,10 @@ const App = () => {
                 </div>
                 <button 
                   onClick={addExpense}
-                  className="w-full py-4 mt-2 bg-slate-900 text-white rounded-xl font-bold hover:bg-black transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2"
+                  className="w-full py-3 mt-2 bg-slate-900 text-white rounded-lg font-bold hover:bg-black transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 text-sm"
                 >
-                  <Plus size={18} />
-                  Record Expense
+                  <Plus size={16} />
+                  Record
                 </button>
               </div>
             </section>
@@ -796,27 +791,28 @@ const App = () => {
   );
 };
 
+// Compact & Responsive Stat Card
 const StatCard = ({ title, value, type, icon: Icon }) => {
   const styles = {
-    success: { bg: "bg-white", border: "border-emerald-100", iconBg: "bg-emerald-50", iconColor: "text-emerald-600", textColor: "text-emerald-700", shadow: "shadow-emerald-100" },
-    danger: { bg: "bg-white", border: "border-rose-100", iconBg: "bg-rose-50", iconColor: "text-rose-600", textColor: "text-rose-700", shadow: "shadow-rose-100" },
-    primary: { bg: "bg-white", border: "border-indigo-100", iconBg: "bg-indigo-50", iconColor: "text-indigo-600", textColor: "text-indigo-700", shadow: "shadow-indigo-100" },
-    warning: { bg: "bg-white", border: "border-amber-100", iconBg: "bg-amber-50", iconColor: "text-amber-600", textColor: "text-amber-700", shadow: "shadow-amber-100" }
+    success: { bg: "bg-white", border: "border-emerald-100", iconBg: "bg-emerald-50", iconColor: "text-emerald-600", textColor: "text-emerald-700" },
+    danger: { bg: "bg-white", border: "border-rose-100", iconBg: "bg-rose-50", iconColor: "text-rose-600", textColor: "text-rose-700" },
+    primary: { bg: "bg-white", border: "border-indigo-100", iconBg: "bg-indigo-50", iconColor: "text-indigo-600", textColor: "text-indigo-700" },
+    warning: { bg: "bg-white", border: "border-amber-100", iconBg: "bg-amber-50", iconColor: "text-amber-600", textColor: "text-amber-700" }
   };
 
   const style = styles[type];
 
   return (
-    <div className={`${style.bg} p-4 rounded-2xl border ${style.border} shadow-sm flex flex-col justify-between min-h-[110px] transition-all hover:-translate-y-1 relative overflow-hidden`}>
-      <div className="flex justify-between items-start relative z-10 mb-2">
-         <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{title}</p>
+    <div className={`${style.bg} p-4 rounded-2xl border ${style.border} shadow-sm flex flex-col justify-between min-h-[100px] transition-all relative overflow-hidden`}>
+      <div className="flex justify-between items-start relative z-10 mb-1">
+         <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{title}</p>
          <div className={`p-1.5 rounded-lg ${style.iconBg} ${style.iconColor}`}>
-          <Icon size={16} />
+          <Icon size={14} />
         </div>
       </div>
       <div className="relative z-10">
-        <h3 className={`text-2xl font-black tracking-tight ${style.textColor} flex items-center gap-0.5`}>
-          <span className="text-base opacity-60">₹</span>
+        <h3 className={`text-xl font-black tracking-tight ${style.textColor} flex items-center gap-0.5`}>
+          <span className="text-sm opacity-60">₹</span>
           {Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}
         </h3>
       </div>
