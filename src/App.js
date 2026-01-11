@@ -17,7 +17,9 @@ import {
   ArrowRightLeft,
   UserCircle,
   Save,
-  AlertCircle
+  AlertCircle,
+  Pencil,
+  X
 } from 'lucide-react';
 
 const MEMBERS = ['Anjaneyulu', 'Srinivas', 'Goutham'];
@@ -59,6 +61,8 @@ const App = () => {
   // Form Inputs
   const [newShopName, setNewShopName] = useState('');
   const [newShopRent, setNewShopRent] = useState('');
+  const [editingShopId, setEditingShopId] = useState(null); // Track which shop is being edited
+
   const [newExpenseDesc, setNewExpenseDesc] = useState('');
   const [newExpenseAmount, setNewExpenseAmount] = useState('');
   const [newExpensePayer, setNewExpensePayer] = useState('Shared');
@@ -202,15 +206,39 @@ const App = () => {
     setShops(prev => [...prev, ...newShops]);
   };
 
-  const addShop = () => {
+  const handleSaveShop = () => {
     if (!newShopName || !newShopRent) return;
-    const newShop = {
-      id: generateId(),
-      name: newShopName,
-      baseRent: Number(newShopRent),
-      createdAt: new Date().toISOString()
-    };
-    setShops([...shops, newShop]);
+
+    if (editingShopId) {
+        // Update existing shop
+        setShops(shops.map(shop => 
+            shop.id === editingShopId 
+                ? { ...shop, name: newShopName, baseRent: Number(newShopRent) } 
+                : shop
+        ));
+        setEditingShopId(null);
+    } else {
+        // Add new shop
+        const newShop = {
+            id: generateId(),
+            name: newShopName,
+            baseRent: Number(newShopRent),
+            createdAt: new Date().toISOString()
+        };
+        setShops([...shops, newShop]);
+    }
+    setNewShopName('');
+    setNewShopRent('');
+  };
+
+  const startEditing = (shop) => {
+    setEditingShopId(shop.id);
+    setNewShopName(shop.name);
+    setNewShopRent(shop.baseRent);
+  };
+
+  const cancelEditing = () => {
+    setEditingShopId(null);
     setNewShopName('');
     setNewShopRent('');
   };
@@ -218,6 +246,7 @@ const App = () => {
   const deleteShop = (id) => {
     if(window.confirm("Are you sure you want to delete this shop?")) {
         setShops(shops.filter(s => s.id !== id));
+        if (editingShopId === id) cancelEditing();
     }
   };
 
@@ -277,7 +306,7 @@ const App = () => {
     setExpenses(expenses.filter(e => e.id !== id));
   };
 
-  // --- PDF GENERATION (COMPACT MODE) ---
+  // --- PDF GENERATION (COMPACT MODE WITH INCREASED SPACING) ---
   const generatePDF = () => {
     if (!window.jspdf) return;
     
@@ -339,14 +368,15 @@ const App = () => {
 
     doc.setTextColor(0, 0, 0);
 
-    let currentY = cardY + cardHeight + 10;
+    let currentY = cardY + cardHeight + 12; // Increased gap before first table
 
-    // Compact Table Styles
-    const tableStyles = { fontSize: 8, cellPadding: 1.5, fontStyle: 'bold' };
-    const headStyles = { fillColor: [59, 130, 246], fontStyle: 'bold', fontSize: 8, cellPadding: 2 };
+    // Spaced Out Table Styles
+    // Increased fontSize slightly and cellPadding significantly for "more space between lines"
+    const tableStyles = { fontSize: 9, cellPadding: 4, fontStyle: 'bold' }; 
+    const headStyles = { fillColor: [59, 130, 246], fontStyle: 'bold', fontSize: 9, cellPadding: 4 };
 
     if (monthlyData.transactions.length > 0) {
-        doc.setFontSize(10);
+        doc.setFontSize(11);
         doc.setTextColor(30, 41, 59);
         doc.text('Settlement Plan', 14, currentY);
         
@@ -356,7 +386,7 @@ const App = () => {
         ]);
 
         doc.autoTable({
-            startY: currentY + 3,
+            startY: currentY + 4,
             head: [['From', 'Action', 'To', 'Amount']],
             body: transactionBody,
             theme: 'striped',
@@ -364,7 +394,7 @@ const App = () => {
             styles: tableStyles,
             margin: { left: 14, right: 14 }
         });
-        currentY = doc.lastAutoTable.finalY + 8;
+        currentY = doc.lastAutoTable.finalY + 12; // More space between tables
     }
 
     const shopBody = shops.map(shop => {
@@ -377,12 +407,12 @@ const App = () => {
       ];
     });
 
-    doc.setFontSize(10);
+    doc.setFontSize(11);
     doc.setTextColor(30, 41, 59);
     doc.text('Shop Payment Details', 14, currentY);
     
     doc.autoTable({
-      startY: currentY + 3,
+      startY: currentY + 4,
       head: [['Shop Name', 'Base Rent', 'Status', 'Paid']],
       body: shopBody,
       theme: 'grid',
@@ -398,17 +428,18 @@ const App = () => {
       }
     });
 
-    currentY = doc.lastAutoTable.finalY + 8;
+    currentY = doc.lastAutoTable.finalY + 12;
 
     if (monthlyData.monthExpenses.length > 0) {
-      if (currentY > 250) { doc.addPage(); currentY = 20; }
+      // Adjusted page break check since tables are now taller
+      if (currentY > 240) { doc.addPage(); currentY = 20; }
 
       const expenseBody = monthlyData.monthExpenses.map(exp => [
         exp.description, exp.paidBy || 'Shared', `Rs. ${exp.amount.toLocaleString()}`
       ]);
       doc.text('Monthly Expenditures', 14, currentY);
       doc.autoTable({
-        startY: currentY + 3,
+        startY: currentY + 4,
         head: [['Description', 'Paid By', 'Amount']],
         body: expenseBody,
         theme: 'striped',
@@ -607,12 +638,20 @@ const App = () => {
                             </div>
                           </td>
                           <td className="px-4 py-4 text-right">
-                            <button 
-                              onClick={() => deleteShop(shop.id)}
-                              className="text-slate-300 hover:text-rose-500 hover:bg-rose-50 p-2 rounded-lg transition-all"
-                            >
-                              <Trash2 size={16} />
-                            </button>
+                            <div className="flex justify-end gap-2">
+                                <button 
+                                    onClick={() => startEditing(shop)}
+                                    className="text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 p-2 rounded-lg transition-all"
+                                >
+                                    <Pencil size={16} />
+                                </button>
+                                <button 
+                                    onClick={() => deleteShop(shop.id)}
+                                    className="text-slate-300 hover:text-rose-500 hover:bg-rose-50 p-2 rounded-lg transition-all"
+                                >
+                                    <Trash2 size={16} />
+                                </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -628,6 +667,19 @@ const App = () => {
                 </table>
               </div>
               <div className="p-5 bg-slate-50/50 border-t border-slate-100">
+                <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
+                    {editingShopId ? (
+                        <>
+                            <Pencil size={14} className="text-indigo-500" />
+                            Editing Shop
+                        </>
+                    ) : (
+                        <>
+                            <Plus size={14} />
+                            Add New Shop
+                        </>
+                    )}
+                </h4>
                 <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
                   <div className="flex-grow w-full sm:w-auto">
                     <input 
@@ -648,12 +700,26 @@ const App = () => {
                     />
                   </div>
                   <button 
-                    onClick={addShop}
-                    className="w-full sm:w-auto h-[42px] px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-200 font-bold active:scale-95 text-sm"
+                    onClick={handleSaveShop}
+                    className={`w-full sm:w-auto h-[42px] px-4 text-white rounded-lg transition-all flex items-center justify-center gap-2 shadow-lg font-bold active:scale-95 text-sm ${
+                        editingShopId 
+                        ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200' 
+                        : 'bg-slate-900 hover:bg-slate-800 shadow-slate-200'
+                    }`}
                   >
-                    <Plus size={16} />
-                    <span>Add</span>
+                    {editingShopId ? <Save size={16} /> : <Plus size={16} />}
+                    <span>{editingShopId ? 'Update' : 'Add'}</span>
                   </button>
+                  
+                  {editingShopId && (
+                      <button 
+                        onClick={cancelEditing}
+                        className="w-full sm:w-auto h-[42px] px-4 bg-slate-200 text-slate-600 rounded-lg hover:bg-slate-300 transition-all flex items-center justify-center gap-2 font-bold active:scale-95 text-sm"
+                      >
+                        <X size={16} />
+                        Cancel
+                      </button>
+                  )}
                 </div>
               </div>
             </section>
