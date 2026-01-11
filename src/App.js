@@ -475,7 +475,7 @@ const App = () => {
             </div>
             <div>
               <h1 className="text-2xl font-black tracking-tight text-slate-900">Gujjari's Rental</h1>
-              <p className="text-xs text-slate-500 font-medium uppercase tracking-wider"> @Bhavzz creation</p>
+              <p className="text-xs text-slate-500 font-medium uppercase tracking-wider"> @Gujjari Rental Management</p>
             </div>
           </div>
           
